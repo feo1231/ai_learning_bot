@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: ai-learning-bot
+    env: python
+    plan: free
+    runtime: python
+    buildCommand: ""
+    startCommand: python bot.py
+    autoDeploy: true
