@@ -25,7 +25,7 @@ menu_keyboard = InlineKeyboardMarkup(inline_keyboard=[
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
     await message.answer(
-        "Привет! 👋 Я бот-помощник для изучения ИИ.
+        "Привет! 👋 Я бот-помощник для изучения ИИ."
 Выбери действие ниже ⬇️",
         reply_markup=menu_keyboard,
     )
