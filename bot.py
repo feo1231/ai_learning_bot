@@ -12,8 +12,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.exceptions import TelegramForbiddenError
 
 # 🔐 Конфигурация
-API_TOKEN = os.getenv("API_TOKEN")
-ADMIN_ID = 123456789
+API_TOKEN = "7948123186:AAEsauVwTD7N4XV9BOYwFVi1tfQCPCMwTgY"
+ADMIN_ID = 380134226
 
 logging.basicConfig(level=logging.INFO)
 
