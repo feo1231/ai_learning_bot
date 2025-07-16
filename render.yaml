@@ -2,8 +2,11 @@ services:
   - type: web
     name: ai_learning_bot
     env: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python bot.py"
+    plan: free
+    buildCommand: |
+      echo "python-3.11.9" > runtime.txt
+      pip install -r requirements.txt
+    startCommand: python bot.py
     envVars:
-      - key: BOT_TOKEN
-        value: 7948123186:AAEsauVwTD7N4XV9BOYwFVi1tfQCPCMwTgY
+      - key: PYTHON_VERSION
+        value: 3.11.9
