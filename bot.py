@@ -1,140 +1,164 @@
-import asyncio
 import logging
-import os
-from datetime import datetime
-from typing import List, Tuple
-
-from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+import asyncio
+import aiofiles
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.enums import ParseMode
+from aiogram.utils.markdown import hbold
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.exceptions import TelegramForbiddenError
 
-# 🔐 Конфигурация
-API_TOKEN = "7948123186:AAEsauVwTD7N4XV9BOYwFVi1tfQCPCMwTgY"
-ADMIN_ID = 380134226
+API_TOKEN = 'ТВОЙ_ТОКЕН'
+ADMIN_ID = 123456789  # ← сюда вставь свой Telegram ID
 
 logging.basicConfig(level=logging.INFO)
+bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
+dp = Dispatcher(storage=MemoryStorage())
 
-bot = Bot(token=API_TOKEN)
-storage = MemoryStorage()
-dp = Dispatcher(storage=storage)
-router = Router()
+# Хранилище пользователей
+user_data = {}
 
-STAGES: List[Tuple[str, str]] = [
-    ("Основы Python", "https://stepik.org/course/67"),
-    ("Математика для ИИ", "https://www.khanacademy.org/math"),
-    ("Машинное обучение", "https://www.coursera.org/learn/machine-learning"),
-    ("Глубокое обучение", "https://www.coursera.org/specializations/deep-learning"),
-    ("LLM и Chat-боты", "https://huggingface.co/learn/nlp-course/chapter1"),
-    ("Деплой и облака", "https://render.com"),
-    ("Портфолио и заказы", "https://github.com")
-]
+# Курс
+COURSE = {
+    "Python Базовый": [
+        "Урок 1: Переменные и типы данных.",
+        "Урок 2: Условия и циклы.",
+        "Урок 3: Функции и модули."
+    ],
+    "ИИ для начинающих": [
+        "Урок 1: Что такое ИИ?",
+        "Урок 2: Основы машинного обучения.",
+        "Урок 3: Применения ИИ в реальной жизни.",
+        "Урок 4: Нейронные сети.",
+        "Урок 5: ChatGPT и другие модели."
+    ]
+}
 
-users_data = {}
+# Состояния
+class UserState(StatesGroup):
+    choosing_course = State()
+    viewing_lesson = State()
 
-class AdminState(StatesGroup):
-    waiting_task_text = State()
-    waiting_notify_time = State()
+# Инлайн-клавиатура главного меню
+def main_menu():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📚 Мой курс", callback_data="my_course")],
+        [InlineKeyboardButton(text="➡️ Следующий урок", callback_data="next_lesson")],
+        [InlineKeyboardButton(text="🔄 Сменить курс", callback_data="change_course")],
+        [InlineKeyboardButton(text="❓ Помощь", callback_data="help")]
+    ])
 
-def get_user_data(user_id: int):
-    if user_id not in users_data:
-        users_data[user_id] = {"stage": 0, "notify": "", "stats": 0}
-    return users_data[user_id]
+# Старт
+@dp.message(F.text == "/start")
+async def cmd_start(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    user_data[user_id] = {"name": message.from_user.first_name, "course": None, "lesson": 0}
 
-def get_stage(user_id: int) -> int:
-    return get_user_data(user_id)["stage"]
+    await message.answer(
+        f"Привет, {hbold(user_data[user_id]['name'])}! 👋\n"
+        f"Я бот-помощник для изучения ИИ и Python.\n\n"
+        "Выбери курс для начала:",
+        reply_markup=course_keyboard()
+    )
+    await state.set_state(UserState.choosing_course)
 
-def set_stage(user_id: int, stage: int):
-    get_user_data(user_id)["stage"] = stage
+# Клавиатура выбора курса
+def course_keyboard():
+    buttons = [
+        [InlineKeyboardButton(text=course, callback_data=f"course_{course}")]
+        for course in COURSE
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def set_notify_time(user_id: int, notify_time: str):
-    get_user_data(user_id)["notify"] = notify_time
+# Выбор курса
+@dp.callback_query(F.data.startswith("course_"))
+async def choose_course(callback: types.CallbackQuery, state: FSMContext):
+    course_name = callback.data.split("course_")[1]
+    user_id = callback.from_user.id
+    user_data[user_id]["course"] = course_name
+    user_data[user_id]["lesson"] = 0
 
-def get_notify_time(user_id: int) -> str:
-    return get_user_data(user_id)["notify"]
+    await callback.message.edit_text(
+        f"Ты выбрал курс: <b>{course_name}</b>\n\nГотов начать?",
+        reply_markup=main_menu()
+    )
+    await state.set_state(UserState.viewing_lesson)
 
-def add_stat(user_id: int):
-    get_user_data(user_id)["stats"] += 1
+# Показать текущий курс
+@dp.callback_query(F.data == "my_course")
+async def show_course(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    course = user_data[user_id].get("course")
+    lesson = user_data[user_id].get("lesson", 0)
 
-def get_stat(user_id: int) -> int:
-    return get_user_data(user_id)["stats"]
-
-main_kb = ReplyKeyboardMarkup(keyboard=[
-    [KeyboardButton(text="📚 Прогресс"), KeyboardButton(text="🧠 Задание")],
-    [KeyboardButton(text="🔔 Напоминание"), KeyboardButton(text="📈 Статистика")],
-    [KeyboardButton(text="⚙️ Помощь")]
-], resize_keyboard=True)
-
-@router.message(F.text == "/start")
-async def start_handler(message: Message):
-    get_user_data(message.from_user.id)
-    await message.answer("Привет! Я помогу тебе пройти курс по нейросетям.", reply_markup=main_kb)
-
-@router.message(F.text == "📚 Прогресс")
-async def progress_handler(message: Message):
-    stage = get_stage(message.from_user.id)
-    lines = [f"{'✅' if i < stage else '⬜'} {i + 1}. {title}" for i, (title, _) in enumerate(STAGES)]
-    await message.answer("Твой прогресс:\n" + "\n".join(lines))
-
-@router.message(F.text == "🧠 Задание")
-async def task_handler(message: Message):
-    stage = get_stage(message.from_user.id)
-    if stage >= len(STAGES):
-        await message.answer("🎉 Все этапы завершены!")
+    if not course:
+        await callback.answer("Сначала выбери курс.")
         return
-    title, link = STAGES[stage]
-    await message.answer(f"📌 Этап {stage + 1}: {title}\nСсылка: {link}\nКогда выполнишь — напиши 'готово'.")
-    add_stat(message.from_user.id)
 
-@router.message(F.text.lower().in_(["готово", "готов", "done"]))
-async def done_handler(message: Message):
-    stage = get_stage(message.from_user.id)
-    set_stage(message.from_user.id, stage + 1)
-    await message.answer("Молодец! Этап пройден. ✅")
+    progress = int((lesson / len(COURSE[course])) * 100)
+    text = f"📘 Курс: <b>{course}</b>\n" \
+           f"📍 Урок: {lesson + 1} из {len(COURSE[course])}\n" \
+           f"📊 Прогресс: {progress}%"
 
-@router.message(F.text == "🔔 Напоминание")
-async def reminder_handler(message: Message, state: FSMContext):
-    await message.answer("Во сколько напоминать каждый день? (формат HH:MM по МСК)")
-    await state.set_state(AdminState.waiting_notify_time)
+    await callback.message.edit_text(text, reply_markup=main_menu())
 
-@router.message(AdminState.waiting_notify_time)
-async def save_notify(message: Message, state: FSMContext):
-    try:
-        datetime.strptime(message.text, "%H:%M")
-        set_notify_time(message.from_user.id, message.text)
-        await message.answer(f"Напоминание установлено на {message.text}")
-        await state.clear()
-    except ValueError:
-        await message.answer("Формат должен быть HH:MM")
+# Следующий урок
+@dp.callback_query(F.data == "next_lesson")
+async def next_lesson(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    course = user_data[user_id].get("course")
+    lesson = user_data[user_id].get("lesson", 0)
 
-@router.message(F.text == "📈 Статистика")
-async def stat_handler(message: Message):
-    count = get_stat(message.from_user.id)
-    await message.answer(f"Ты открывал задание {count} раз(а). Продолжай в том же духе! 💪")
+    if course is None:
+        await callback.answer("Сначала выбери курс.")
+        return
 
-@router.message(F.text == "⚙️ Помощь")
-async def help_handler(message: Message):
-    await message.answer("Я бот-трекер для изучения нейросетей. Прогресс хранится в памяти. Используй меню для обучения.")
+    lessons = COURSE[course]
+    if lesson >= len(lessons):
+        await callback.message.edit_text(
+            "🎉 Поздравляю! Ты завершил курс.",
+            reply_markup=main_menu()
+        )
+        return
 
-async def scheduler():
-    while True:
-        now = datetime.now().strftime("%H:%M")
-        for user_id, data in users_data.items():
-            if data["notify"] == now:
-                try:
-                    await bot.send_message(user_id, "⏰ Напоминание: пора учиться!")
-                except TelegramForbiddenError:
-                    continue
-        await asyncio.sleep(60)
+    await callback.message.edit_text(
+        f"<b>{lessons[lesson]}</b>",
+        reply_markup=main_menu()
+    )
+    user_data[user_id]["lesson"] += 1
 
+# Сменить курс
+@dp.callback_query(F.data == "change_course")
+async def change_course(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("Выбери новый курс:", reply_markup=course_keyboard())
+    await state.set_state(UserState.choosing_course)
+
+# Помощь
+@dp.callback_query(F.data == "help")
+async def help_menu(callback: types.CallbackQuery):
+    await callback.message.edit_text(
+        "🧠 <b>Чем я могу помочь:</b>\n"
+        "- /start — начать сначала\n"
+        "- Переключаться между курсами\n"
+        "- Переходить по урокам\n"
+        "- Отслеживать прогресс\n"
+        "- Обратная связь через разработчика",
+        reply_markup=main_menu()
+    )
+
+# Обработка всех ошибок
+@dp.errors()
+async def error_handler(event, error):
+    logging.error(f"Ошибка: {error}")
+    if hasattr(event, 'from_user'):
+        await bot.send_message(ADMIN_ID, f"⚠️ Ошибка у пользователя {event.from_user.id}: {error}")
+
+# Запуск
 async def main():
-    dp.include_router(router)
-    asyncio.create_task(scheduler())
     await dp.start_polling(bot)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
 
 
