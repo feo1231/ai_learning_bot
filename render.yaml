@@ -1,12 +1,12 @@
+# ai_learning_bot background worker config
 services:
-  - type: web
+  - type: worker
     name: ai_learning_bot
-    env: python
-    plan: free
-    buildCommand: |
-      echo "python-3.11.9" > runtime.txt
-      pip install -r requirements.txt
-    startCommand: python bot.py
+    runtime: python
+    repo: https://github.com/feo1231/ai_learning_bot
+    branch: main
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python bot.py"
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
